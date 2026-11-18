@@ -98,6 +98,33 @@ git push origin main
 `NativeCommandError` — это **не** ошибка. Признак успеха — `exit code: 0`
 и строка вида `main -> main`.
 
+**`push` требует полного доступа к системе.** Git получает учётные данные
+через внешний процесс (`gh auth git-credential`). В ограниченном режиме
+DSH этот процесс не запускается, и пуш падает так:
+
+```text
+fatal error - couldn't create signal pipe, Win32 error 5
+error: failed to execute prompt script (exit code 66)
+fatal: could not read Username for 'https://github.com'
+```
+
+**Это не поломка конфига.** Проверка `gh auth git-credential get`
+в том же окружении выдаёт токен — значит учётные данные в порядке, а
+виноват запрет на запуск внешних процессов. Не надо править `helper`,
+`remote` или вписывать токен в URL: нужен только полный доступ.
+
+Отдельная ловушка: `http.sslBackend=schannel` (значение по умолчанию в
+системном конфиге Git) ломает TLS на этой машине с ошибкой
+`schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`.
+Лечится один раз на репозиторий:
+
+```powershell
+git config http.sslBackend openssl
+```
+
+Параметр хранится в `.git\config`, то есть в репозиторий не попадает и
+при клонировании его нужно задать заново.
+
 ### 3.4. Проверка результата
 
 ```powershell
