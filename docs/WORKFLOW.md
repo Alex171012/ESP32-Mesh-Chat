@@ -146,10 +146,17 @@ HEAD и `origin/main` должны совпадать, рабочее дерев
 | GitHub CLI | `C:\Program Files\GitHub CLI\gh.exe` | 2.104.0, вход выполнен |
 | PlatformIO | `C:\Users\Aleksandr\.platformio\penv\Scripts\pio.exe` | **не в PATH**, вызывать полным путём |
 | VS Code | `%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd` | расширения: C/C++, PlatformIO IDE |
-| Node.js | не установлен | нужен для локального сервера клиента |
+| Python | в PATH | локальный сервер клиента: `python -m http.server` |
+| MinGW g++ | `…\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT…\mingw64\bin` | нужен для `pio test -e native*` |
+| Node.js | **не установлен** | **не требуется** — сервер на Python |
 
 **PlatformIO требует:** `$env:PYTHONIOENCODING = "utf-8"` перед запуском,
-иначе падает с `UnicodeEncodeError`.
+иначе падает с `UnicodeEncodeError`. И восстанавливать PATH (Git и `gcc`
+не в PATH сессии по умолчанию):
+
+```powershell
+$env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
+```
 
 **Файлы конфигурации писать без BOM.** PowerShell 5.1 через
 `Set-Content -Encoding UTF8` добавляет BOM, и PlatformIO не читает
@@ -205,9 +212,14 @@ HEAD и `origin/main` должны совпадать, рабочее дерев
 | Прошивка, BLE | `protocol/BLE_API.md`, `docs/ARCHITECTURE.md` §5 |
 | Тесты | `docs/TEST_PLAN.md` |
 
-**Что сообщить в новом чате:** какое железо подключено, есть ли
-USB-кабель с передачей данных, установлен ли Node.js. Это переменные
-величины, и в репозитории они не отражены.
+**Что сообщить в новом чате:** какое железо подключено (плата на COM?,
+сколько плат), есть ли USB-кабель с передачей данных. Это переменные
+величины, и в репозитории они не отражены. Нужен ли Node.js — **нет**,
+сервер на Python.
+
+**Текущее состояние репозитория** — `docs/WORKFLOW.md` §7 и
+`docs/stages/README.md`. Если они расходятся с кодом — править документы
+(`WORKFLOW.md` §5.1: правка документов не требует согласования).
 
 ---
 
@@ -215,12 +227,28 @@ USB-кабель с передачей данных, установлен ли N
 
 | Что | Состояние |
 |---|---|
-| Документы | готовы |
+| Документы | готовы, статусы обновлены под код |
 | Контракт BLE | зафиксирован (`BLE_API.md` §6–7) |
 | Протокол mesh | зафиксирован (`MESH_PROTOCOL.md` §7.1) |
-| Реализация | **не начата** |
-| Платы | 3 шт., не подключены |
-| USB-serial | не обнаружен, прошивка невозможна |
+| Веб-клиент | ✅ **написан** (этапы 1–8); этап 9 (`ble.js`) ждёт железа |
+| Прошивка | ✅ **написана**; `mesh_core` + скелет `src/` |
+| Тесты L1/L2 | ✅ **29/29 PASSED** (`pio test -e native_*`) |
+| Сборка esp32c3 | ✅ SUCCESS (RAM 15%, flash 90%) |
+| Плата | 1 подключена (COM5, `node_id=0xE808`), прошита, работает |
+| Остальные платы | 2 не подключены |
+| Прошивка плат | выполнялась (H1), дальше — по согласованию |
 
-**Следующий шаг:** этап 1 клиента — каркас (`WEB_CLIENT_PLAN.md` §8).
-Для него нужен локальный сервер, то есть Node.js.
+**Следующий шаг:** **H2** — подключение клиента к BLE-шлюзу из Chrome
+(`MeshGate-E808`), обмен `ping`/`pong`, замер MTU. Инструкция —
+`docs/INSTRUCTIONS.md`.
+
+**Важные особенности запуска (проверено на железе):**
+
+- **`Serial` идёт в USB-JTAG, а не в UART0.** В `platformio.ini` задано
+  `-DARDUINO_USB_MODE=1 -DARDUINO_USB_CDC_ON_BOOT=1`. Без этого логи
+  платы не видны (ROM пишет в USB, Arduino `Serial` — в UART0 GPIO20/21).
+- **NimBLE 2.x обязателен.** `NimBLE-Arduino@1.4.x` падает на
+  Arduino-ядре 3.3.12 (ESP-IDF 5.4) паникой `Instruction access fault`
+  до `setup()`. Стоит `^2.3.0` (реально 2.5.2).
+- **`sdkconfig.defaults`** фиксирует `CONFIG_BT_NIMBLE_ENABLED=y`,
+  Bluedroid выключен — иначе возможен конфликт стеков.

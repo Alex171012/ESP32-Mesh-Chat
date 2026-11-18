@@ -175,13 +175,15 @@ static void feedBytes(const uint8_t* data, size_t len) {
     }
 }
 
-/* ---- Колбэки NimBLE ---- */
+/* ---- Колбэки NimBLE (API 2.x: NimBLEConnInfo&) ---- */
 class ServerCallbacks : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer* pServer) override {
+    void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+        (void)pServer; (void)connInfo;
         g_client_connected = true;
         Serial.println("[BLE] client connected");
     }
-    void onDisconnect(NimBLEServer* pServer) override {
+    void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+        (void)pServer; (void)connInfo; (void)reason;
         g_client_connected = false;
         Serial.println("[BLE] client disconnected");
         /* Возобновляем рекламу для следующего подключения */
@@ -190,7 +192,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 };
 
 class RxCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* chr) override {
+    void onWrite(NimBLECharacteristic* chr, NimBLEConnInfo& connInfo) override {
+        (void)connInfo;
         NimBLEAttValue v = chr->getValue();
         if (v.size() > 0) feedBytes(v.data(), v.size());
     }
@@ -222,7 +225,8 @@ bool ble_gateway_init(const char* device_name, BleCmdCb on_cmd, BleEventCb on_ev
 
     g_adv = NimBLEDevice::getAdvertising();
     g_adv->addServiceUUID(MESH_SERVICE_UUID);
-    g_adv->setScanResponse(true);
+    /* API 2.x: setScanResponse(bool) удалён — scan response управляется
+     * через advertising data; setScanResponseData принимает данные, а не bool */
     g_adv->start();
 
     Serial.println("[BLE] gateway started as " + String(device_name));

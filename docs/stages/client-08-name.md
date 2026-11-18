@@ -89,4 +89,7 @@
 
 ## Следующий этап
 
-`client-09-ble.md` — реальный Web Bluetooth, после железа.
+Этап 9 — реальный Web Bluetooth (`web/js/transport/ble.js`), после железа.
+Задание `client-09-ble.md` **ещё не создано** — его нужно написать перед
+началом (зависимость: H2, живой BLE-шлюз `MeshGate-E808`). См.
+`docs/stages/README.md` и `docs/INSTRUCTIONS.md` §5.

@@ -17,7 +17,10 @@
 /* TTL по умолчанию (MESH_PROTOCOL §4) */
 #define MESH_DEFAULT_TTL        4
 
-/* LED — [ПРОВЕРИТЬ] распиновку конкретной ревизии SuperMini */
+/* LED — проверено на H1: GPIO8, это RGB-диод (PIN_RGB_LED в
+ * variants/esp32c3/pins_arduino.h). digitalWrite(8, …) мигает видимо.
+ * [ПРОВЕРИТЬ] поведение RGB-контроллера при ID_CONFLICT — мигание может
+ * потребовать rgbLedWrite() вместо digitalWrite(). */
 #define MESH_LED_PIN            8
 
 /* BLE GATT (BLE_API §2) */
