@@ -1,0 +1,117 @@
+/* layout.css — раскладка: десктоп / планшет / мобильный */
+
+.app {
+  display: grid;
+  /* minmax(0, 1fr), а не 1fr: auto-min считается от контента,
+     и лента растягивала колонку за экран на мобильном */
+  grid-template-columns: 264px minmax(0, 1fr) 304px;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* внутренние скролл-области: прокрутка всегда внутри,
+   а не вылезанием контента за колонку */
+.col-scroll, .feed { min-width: 0; max-width: 100%; overflow-x: hidden; }
+
+/* страховка для любой вложенной ширины: даже если что-то
+   переполнится, страница не растянется горизонтально */
+.app, .col, .col-scroll, .feed, .msg { max-width: 100%; }
+
+.col-nodes {
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border-soft);
+}
+
+.col-chat {
+  background: var(--bg);
+}
+
+.col-info {
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border-soft);
+}
+
+.col-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  min-height: 56px;
+  border-bottom: 1px solid var(--border-soft);
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.drawer-open {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.chat-head { padding-left: 48px; }
+
+.col-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.col-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4);
+}
+
+.info-scroll { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+/* --- Планшет: правая колонка скрыта --- */
+@media (max-width: 1100px) {
+  .app { grid-template-columns: 240px minmax(0, 1fr); }
+  .col-info { display: none; }
+}
+/* --- Мобильный: одна колонка, узлы в выдвижной панели --- */
+@media (max-width: 720px) {
+  /* minmax(0,1fr) + широкий контент ленты растягивал auto-min
+     грид-колонки и страницу за экран: одна колонка с явной
+     шириной и жёсткой обрезкой, прокрутка — только внутри ленты */
+  .app {
+    display: block;
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  .col-nodes {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(84vw, 320px);
+    z-index: 40;
+    transform: translateX(-101%);
+    border-right: 1px solid var(--border);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+  }
+  .col-nodes.open { transform: translateX(0); }
+
+  .col-chat { width: 100%; height: 100%; }
+}
+
+/* мобильный: кнопки панели и «холодная» кнопка отключения.
+   Идут ПОСЛЕ @media(max-width:720px): !important в более позднем
+   правиле перебивает !important того же элемента внутри медиазапроса. */
+@media (max-width: 720px) {
+  .drawer-open, .drawer-close { display: inline-flex !important; }
+}
+@media (min-width: 721px) {
+  .drawer-open, .drawer-close { display: none !important; }
+}

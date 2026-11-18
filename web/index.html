@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mesh Chat</title>
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+  <div class="app">
+
+    <!-- ===== Левая колонка: узлы ===== -->
+    <aside class="col col-nodes" id="col-nodes">
+      <header class="col-head">
+        <div class="brand">
+          <span class="brand-mark">⌁</span>
+          <span class="brand-name">Mesh Chat</span>
+        </div>
+        <button class="icon-btn drawer-close" id="drawer-close" title="Закрыть" aria-label="Закрыть">×</button>
+      </header>
+
+      <div class="col-scroll">
+        <section class="group">
+          <h2 class="group-title">Рядом</h2>
+          <ul class="node-list" id="nodes-near"></ul>
+        </section>
+
+        <section class="group">
+          <h2 class="group-title">Через mesh</h2>
+          <ul class="node-list" id="nodes-mesh"></ul>
+        </section>
+      </div>
+    </aside>
+
+    <!-- ===== Средняя колонка: лента ===== -->
+    <main class="col col-chat">
+      <header class="col-head chat-head">
+        <button class="icon-btn drawer-open" id="drawer-open" title="Узлы" aria-label="Узлы">☰</button>
+        <div class="chat-peer">
+          <div class="chat-peer-name" id="chat-peer-name">Всем узлам</div>
+          <div class="chat-peer-sub" id="chat-peer-sub">общий канал · dst 0x0000</div>
+        </div>
+        <span class="badge badge-mock" id="badge-mock" hidden>заглушка</span>
+      </header>
+
+      <div class="feed" id="feed">
+        <div class="feed-empty" id="feed-empty">Сообщений пока нет</div>
+      </div>
+
+      <footer class="composer">
+        <div class="composer-target">
+          <label class="sr-only" for="dst-select">Получатель</label>
+          <select id="dst-select" class="dst-select" title="Получатель"></select>
+        </div>
+        <div class="composer-row">
+          <textarea id="input" class="input" rows="1" maxlength="1000"
+                    placeholder="Сообщение…"></textarea>
+          <button id="send" class="send-btn" title="Отправить" aria-label="Отправить">↑</button>
+        </div>
+        <div class="composer-meta">
+          <span class="counter" id="counter">0 / 179 байт</span>
+          <span class="composer-hint" id="composer-hint"></span>
+        </div>
+      </footer>
+    </main>
+
+    <!-- ===== Правая колонка: узел и подключение ===== -->
+    <aside class="col col-info">
+      <header class="col-head">
+        <span class="col-title">Узел и подключение</span>
+      </header>
+
+      <div class="col-scroll info-scroll">
+        <section class="card">
+          <div class="conn-row">
+            <span class="dot" id="conn-dot"></span>
+            <div class="conn-text">
+              <div class="conn-state" id="conn-state">Нет связи</div>
+              <div class="conn-sub" id="conn-sub">шлюз не подключён</div>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="connect-btn">Подключиться</button>
+          <div class="conn-stats" id="conn-stats" hidden>
+            <div class="stat"><span class="stat-k">Пинг</span><span class="stat-v" id="stat-ping">—</span></div>
+            <div class="stat"><span class="stat-k">MTU</span><span class="stat-v" id="stat-mtu">—</span></div>
+            <div class="stat"><span class="stat-k">Время сессии</span><span class="stat-v" id="stat-uptime">—</span></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3 class="card-title">Свой узел</h3>
+          <dl class="kv">
+            <div class="kv-row"><dt>node_id</dt><dd id="self-id">—</dd></div>
+            <div class="kv-row"><dt>Имя</dt><dd id="self-name">—</dd></div>
+            <div class="kv-row"><dt>session</dt><dd id="self-session">—</dd></div>
+          </dl>
+          <div class="card-actions">
+            <button class="btn btn-ghost" id="name-btn">Сменить имя</button>
+            <button class="btn btn-ghost" id="clear-name-btn" hidden>Сбросить</button>
+          </div>
+          <div class="name-edit" id="name-edit" hidden>
+            <input type="text" id="name-input" class="input" maxlength="24" placeholder="Имя узла (до 24 байт)">
+            <div class="name-edit-actions">
+              <span class="counter" id="name-counter">0 / 24 байт</span>
+              <button class="btn btn-primary btn-sm" id="name-save">Сохранить</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3 class="card-title">Сеть</h3>
+          <dl class="kv">
+            <div class="kv-row"><dt>Узлов известно</dt><dd id="net-count">0</dd></div>
+            <div class="kv-row"><dt>Соседей напрямую</dt><dd id="net-neighbors">0</dd></div>
+            <div class="kv-row"><dt>В сети</dt><dd id="net-online">0</dd></div>
+          </dl>
+        </section>
+
+        <section class="card">
+          <h3 class="card-title">Статистика</h3>
+          <dl class="kv">
+            <div class="kv-row"><dt>Отправлено</dt><dd id="st-sent">0</dd></div>
+            <div class="kv-row"><dt>Доставлено</dt><dd id="st-delivered">0</dd></div>
+            <div class="kv-row"><dt>Не доставлено</dt><dd id="st-failed">0</dd></div>
+          </dl>
+        </section>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Диалог имени при первом подключении -->
+  <div class="modal" id="name-modal" hidden>
+    <div class="modal-box">
+      <h2 class="modal-title">Задайте имя узла</h2>
+      <p class="modal-text">Имя хранится на плате и будет видно всем узлам сети.</p>
+      <input type="text" id="modal-name-input" class="input" maxlength="24" placeholder="Например: Ноутбук">
+      <div class="modal-meta"><span class="counter" id="modal-name-counter">0 / 24 байт</span></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="modal-name-skip">Позже</button>
+        <button class="btn btn-primary" id="modal-name-save">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script>
+    /* Тестовый рычаг: ?diag=1 — подсветить все элементы рамками
+         и записать в консоль их геометрию. Для отладки адаптива. */
+    if (new URLSearchParams(location.search).get("diag") === "1") {
+      var st = document.createElement("style");
+      st.textContent = "body * { outline: 1px solid rgba(255,0,0,0.6); }";
+      document.head.appendChild(st);
+      window.addEventListener("load", function () {
+        setTimeout(function () {
+          var vw = document.documentElement.clientWidth;
+          console.log("[diag] viewport width:", vw);
+          var all = document.querySelectorAll("*");
+          for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            var r = el.getBoundingClientRect();
+            if (r.right > vw + 1 || r.left < -1) {
+              console.log("[diag] OVERFLOW", el.tagName + "." + el.className,
+                "left:", Math.round(r.left), "right:", Math.round(r.right),
+                "width:", Math.round(r.width));
+            }
+          }
+        }, 300);
+      });
+    }
+  </script>
+  <script src="js/protocol.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/transport/mock.js"></script>
+  <script src="js/transport/ble.js"></script>
+  <script src="js/ui/chat.js"></script>
+  <script src="js/ui/nodes.js"></script>
+  <script src="js/ui/route.js"></script>
+  <script src="js/ui/status.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
