@@ -146,9 +146,9 @@ HEAD и `origin/main` должны совпадать, рабочее дерев
 | GitHub CLI | `C:\Program Files\GitHub CLI\gh.exe` | 2.104.0, вход выполнен |
 | PlatformIO | `C:\Users\Aleksandr\.platformio\penv\Scripts\pio.exe` | **не в PATH**, вызывать полным путём |
 | VS Code | `%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd` | расширения: C/C++, PlatformIO IDE |
-| Python | в PATH | локальный сервер клиента: `python -m http.server` |
+| Python | системного **нет**; bundled DSH-runtime | локальный сервер клиента (`INSTRUCTIONS.md` §5.1) |
 | MinGW g++ | `…\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT…\mingw64\bin` | нужен для `pio test -e native*` |
-| Node.js | **не установлен** | **не требуется** — сервер на Python |
+| Node.js | системного **нет**; bundled DSH-runtime | серверу не нужен |
 
 **PlatformIO требует:** `$env:PYTHONIOENCODING = "utf-8"` перед запуском,
 иначе падает с `UnicodeEncodeError`. И восстанавливать PATH (Git и `gcc`
@@ -214,8 +214,9 @@ $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Env
 
 **Что сообщить в новом чате:** какое железо подключено (плата на COM?,
 сколько плат), есть ли USB-кабель с передачей данных. Это переменные
-величины, и в репозитории они не отражены. Нужен ли Node.js — **нет**,
-сервер на Python.
+величины, и в репозитории они не отражены. Нужен ли Node.js — **нет**:
+сервер клиента поднимается на bundled Python из DSH-runtime
+(`INSTRUCTIONS.md` §5.1), системного Python/Node нет.
 
 **Текущее состояние репозитория** — `docs/WORKFLOW.md` §7 и
 `docs/stages/README.md`. Если они расходятся с кодом — править документы

@@ -25,10 +25,15 @@ Set-Location "C:\Users\Aleksandr\Desktop\Project_ESPchat"
 | Инструмент | Где лежит | Нужно? |
 |---|---|---|
 | PlatformIO | `C:\Users\Aleksandr\.platformio\penv\Scripts\pio.exe` | да (полный путь) |
-| Python | в PATH | да (сервер клиента) |
 | MinGW g++ | winget `BrechtSanders.WinLibs.POSIX.UCRT` | да (для `pio test`) |
 | Git | в PATH | да |
-| Node.js | — | **нет** |
+| **Python (для сервера клиента)** | **bundled DSH-runtime**, НЕ в системном PATH | см. §5.1 |
+| Node.js | системного нет; bundled в DSH-runtime | нет (сервер на Python) |
+
+**Важно:** системного `python`/`node` **нет**. `python` в PATH — это
+заглушка Microsoft Store («Python was not found»). Рабочий Python 3.12 и
+Node 24 лежат **внутри DSH-runtime** (`C:\Users\Aleksandr\.dsh\dsh-runtimes\…`)
+и в обычный PATH не видны. Для сервера клиента — см. §5.1.
 
 ---
 
@@ -149,15 +154,20 @@ Set-Location "C:\Users\Aleksandr\Desktop\Project_ESPchat\firmware"
 Web Bluetooth требует **защищённого контекста** — `file://` не годится
 (`BLE_API.md` §1). Нужен `http://localhost`.
 
-```powershell
-# Вариант 1: из папки web
-& "C:\Users\Aleksandr\Desktop\Project_ESPchat\web\serve.cmd"
+**Системного Python нет.** Использовать bundled Python из DSH-runtime:
 
-# Вариант 2: вручную
-python -m http.server 5500 --directory "C:\Users\Aleksandr\Desktop\Project_ESPchat\web"
+```powershell
+& "C:\Users\Aleksandr\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe" `
+    -m http.server 5500 --directory "C:\Users\Aleksandr\Desktop\Project_ESPchat\web"
 ```
 
-Сервер работает в отдельном окне — **не закрывать** во время теста.
+(Альтернатива — bundled Node: `…\node\bin\node.exe`, `http.server` тоже
+есть; Live Server в VS Code — тоже работает.)
+
+Проверка: `http://localhost:5500/` → 200, title «Mesh Chat».
+
+**Удобнее — поднять как фоновую задачу DSH** (переживает команды и
+доступен в браузере), либо оставить окно с командой выше открытым.
 
 ### 5.2. Открыть клиент
 
@@ -225,8 +235,9 @@ Set-Location firmware
 # логи
 & $pio device monitor --port COM5 --baud 115200
 
-# клиент
-python -m http.server 5500 --directory ..\web
+# клиент (системного python нет — bundled DSH-runtime)
+$py = "C:\Users\Aleksandr\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py -m http.server 5500 --directory ..\web
 # → http://localhost:5500/
 
 # git

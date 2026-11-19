@@ -52,7 +52,7 @@ Project_ESPchat/
 │   ├── js/
 │   │   ├── ui/               ← chat, nodes, route, status
 │   │   └── transport/        ← ble.js (заглушка) и mock.js
-│   └── serve.cmd             ← локальный сервер (Python)
+│   └── serve.cmd             ← локальный сервер (см. docs/INSTRUCTIONS.md §5.1)
 ├── protocol/                 ← BLE_API, MESH_PROTOCOL
 ├── docs/                     ← WORKFLOW, TEST_PLAN, ARCHITECTURE, WEB_CLIENT_PLAN
 │   └── stages/               ← client-01…08 (самодостаточные задания)
@@ -130,8 +130,8 @@ $env:PYTHONIOENCODING = "utf-8"
 | GitHub CLI | 2.104.0, вход выполнен |
 | PlatformIO Core | 6.2.0, **не в PATH** |
 | VS Code | расширения: C/C++, PlatformIO IDE |
-| Python | **установлен** — `python -m http.server` для локального сервера |
-| Node.js | не установлен, **не требуется** (сервер на Python) |
+| Python | системного **нет**; рабочий — bundled в DSH-runtime (для сервера клиента) |
+| Node.js | системного **нет**; bundled в DSH-runtime — серверу не нужен |
 | USB-serial | **обнаружен**: COM5 (USB-JTAG `303A:1001`) |
 | МинGW g++ | установлен (winget) — нужен для `pio test -e native*` |
 
@@ -172,7 +172,7 @@ $env:PYTHONIOENCODING = "utf-8"
 - **Сборка прошивки:** `pio run -e esp32c3` из `firmware/`.
 - **Прошивка платы:** `pio run -e esp32c3 -t upload --upload-port COM5` (требует согласования!).
 - **Логи платы:** `pio device monitor --port COM5 --baud 115200`.
-- **Клиент:** `web/serve.cmd`, затем `http://localhost:5500/`.
+- **Клиент:** сервер поднять (Python из DSH-runtime, `docs/INSTRUCTIONS.md` §5.1), затем `http://localhost:5500/`.
 
 ---
 

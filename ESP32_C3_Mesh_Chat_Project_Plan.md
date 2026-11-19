@@ -386,8 +386,10 @@ HTTPS.
 **5. Node.js не установлен — и не требуется.** Статические файлы клиента
 работают и без него, а **для реального BLE нужен локальный сервер**: Web
 Bluetooth требует защищённого контекста, а `file://` им не является.
-**Решено: сервер на Python** — `python -m http.server` (см.
-`web/serve.cmd`). Node.js и Live Server не понадобились.
+**Решено: сервер на Python** — но **системного Python нет** (`python` в
+PATH — заглушка Microsoft Store). Работает bundled Python из DSH-runtime:
+`…\dsh-runtimes\…\python.exe -m http.server` (см. `docs/INSTRUCTIONS.md`
+§5.1). Node.js и Live Server не понадобились.
 
 **6. Для тестов нужен MinGW g++ (не в PATH по умолчанию).** `pio test -e
 native_*` компилирует под x86-64, поэтому нужен `gcc`/`g++`. Установлен

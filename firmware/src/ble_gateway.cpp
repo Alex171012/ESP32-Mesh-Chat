@@ -224,13 +224,23 @@ bool ble_gateway_init(const char* device_name, BleCmdCb on_cmd, BleEventCb on_ev
     service->start();
 
     g_adv = NimBLEDevice::getAdvertising();
+    /* Имя ОБЯЗАТЕЛЬНО в advertising data — NimBLEDevice::init() кладёт его
+     * только в GAP, но фильтр клиента { namePrefix: "MeshGate-" } ищет имя
+     * в рекламе. Без setName() Chrome пишет «Нет устройств». */
+    g_adv->setName(device_name);
     g_adv->addServiceUUID(MESH_SERVICE_UUID);
-    /* API 2.x: setScanResponse(bool) удалён — scan response управляется
-     * через advertising data; setScanResponseData принимает данные, а не bool */
-    g_adv->start();
+    /* Scan response включаем: туда уходит полное имя, если adv-packet
+     * переполнен (31 байт) — иначе имя обрежется и фильтр не совпадёт. */
+    g_adv->enableScanResponse(true);
 
+    bool adv_ok = g_adv->start();
     Serial.println("[BLE] gateway started as " + String(device_name));
-    return true;
+    Serial.printf("[BLE] advertising: %s (name=%s)\n",
+                  adv_ok ? "OK" : "FAILED", device_name);
+    if (!adv_ok) {
+        Serial.println("[BLE] WARNING: advertising failed to start");
+    }
+    return adv_ok;
 }
 
 bool ble_gateway_connected() {
