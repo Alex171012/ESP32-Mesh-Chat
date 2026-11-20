@@ -20,6 +20,18 @@ var ble = (function () {
 
   var handlers = {};
 
+  /* ---- Отладочная панель (blelog.js): все шаги BLE видны на странице ---- */
+  var L = (typeof blelog !== "undefined") ? blelog :
+          { log: function () {}, warn: function () {}, error: function () {} };
+
+  /* Человекочитаемое описание ошибки Web Bluetooth: имя + сообщение */
+  function describe(e) {
+    if (!e) return "unknown";
+    var name = e.name || (e.constructor && e.constructor.name) || "Error";
+    var msg = e.message || String(e);
+    return name + ": " + msg;
+  }
+
   /* ---- Состояние подключения ---- */
   var device = null;          /* BluetoothDevice — переживает переподключение */
   var server = null;
@@ -71,7 +83,9 @@ var ble = (function () {
     writeChain = writeChain.then(function () {
       if (!rxChar || !connected) return;
       return rxChar.writeValueWithoutResponse(frame).catch(function (e) {
-        err("write_failed", String(e && e.message ? e.message : e));
+        L.error("write", "writeValueWithoutResponse → " + describe(e) +
+                " (" + frame.length + " байт)");
+        err("write_failed", describe(e));
       });
     });
     return true;
@@ -82,6 +96,8 @@ var ble = (function () {
     for (var i = 0; i < frames.length; i++) {
       var o = frames[i];
       if (!o || !o.t) continue;
+      /* Видимая трассировка входящих кадров (отладка H2) */
+      L.log("кадр", JSON.stringify(o).slice(0, 160));
 
       switch (o.t) {
         case "msg":
@@ -135,7 +151,7 @@ var ble = (function () {
           break;
 
         default:
-          console.warn("[ble] неизвестный тип кадра:", o.t, o);
+          L.warn("кадр", "неизвестный тип: " + o.t + " " + JSON.stringify(o));
       }
     }
   }
@@ -152,19 +168,25 @@ var ble = (function () {
     if (!device) {
       /* Первое подключение: жест пользователя обязателен (BLE_API §1). */
       fire("ble", { connecting: true });
+      L.log("connect", "запрашиваю выбор устройства (namePrefix=MeshGate-)");
       navigator.bluetooth.requestDevice({
         filters: [{ namePrefix: "MeshGate-" }],
         optionalServices: [CONFIG.SERVICE_UUID]
       }).then(function (d) {
         device = d;
+        /* Web Bluetooth не даёт MAC; id — служебный идентификатор браузера */
+        L.log("connect", "устройство выбрано: name=" + (d.name || "?") +
+              " id=" + (d.id || "?"));
         device.addEventListener("gattserverdisconnected", onDisconnected);
         return doConnect();
       }).catch(function (e) {
         if (e && e.name === "NotFoundError") {
           /* пользователь закрыл диалог — не ошибка */
+          L.log("connect", "диалог закрыт без выбора (NotFoundError)");
           fire("ble", { connected: false, reason: "user" });
         } else {
-          err("request_failed", String(e && e.message ? e.message : e));
+          L.error("connect", "requestDevice → " + describe(e));
+          err("request_failed", describe(e));
           fire("ble", { connected: false, reason: "user" });
         }
       });
@@ -172,6 +194,7 @@ var ble = (function () {
     }
     /* Переподключение к уже выбранному устройству (BLE_API §6.2) */
     fire("ble", { connecting: true });
+    L.log("connect", "переподключение к " + (device.name || "?"));
     doConnect();
   }
 
@@ -181,10 +204,14 @@ var ble = (function () {
       fire("ble", { connected: false });
       return Promise.resolve();
     }
+    L.log("gatt", "1/4 device.gatt.connect() …");
     return device.gatt.connect().then(function (s) {
       server = s;
+      L.log("gatt", "1/4 OK — соединение GATT установлено");
+      L.log("gatt", "2/4 getPrimaryService(" + CONFIG.SERVICE_UUID + ") …");
       return server.getPrimaryService(CONFIG.SERVICE_UUID);
     }).then(function (svc) {
+      L.log("gatt", "2/4 OK — сервис найден");
       return Promise.all([
         svc.getCharacteristic(CONFIG.RX_UUID),
         svc.getCharacteristic(CONFIG.TX_UUID)
@@ -192,14 +219,19 @@ var ble = (function () {
     }).then(function (chars) {
       rxChar = chars[0];
       txChar = chars[1];
+      L.log("gatt", "3/4 OK — RX/TX характеристики получены");
+      L.log("gatt", "      RX props=" + JSON.stringify(rxChar.properties) +
+            ", TX props=" + JSON.stringify(txChar.properties));
 
       feeder = protocol.createFeeder(function (msg) {
-        console.warn("[ble] кадр: " + msg);
+        L.warn("feeder", msg);
       });
 
+      L.log("gatt", "4/4 startNotifications (TX) …");
       return txChar.startNotifications().then(function (c) {
         c.addEventListener("characteristicvaluechanged", onNotify);
         connected = true;
+        L.log("gatt", "4/4 OK — подписка на notify активна, подключено");
         fire("ble", { connected: true, gateway: null });
         startTick();
         /* MTU приходит от шлюза: status {kind:"ready", mtu} после подписки
@@ -208,7 +240,9 @@ var ble = (function () {
     }).catch(function (e) {
       connected = false;
       rxChar = txChar = server = null;
-      err("connect_failed", String(e && e.message ? e.message : e));
+      L.error("connect_failed", describe(e) +
+              " — см. последний шаг «… /4» выше");
+      err("connect_failed", describe(e));
       fire("ble", { connected: false, reason: "connect" });
     });
   }
@@ -217,15 +251,24 @@ var ble = (function () {
     var v = ev.target.value;   /* DataView */
     if (!v) return;
     var bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+    /* Трассировка потока notify: длина пакета + hex-превью (отладка H2) */
+    var hex = [];
+    for (var k = 0; k < bytes.length && k < 16; k++) {
+      hex.push(("0" + bytes[k].toString(16)).slice(-2));
+    }
+    L.log("notify", bytes.length + " байт: " + hex.join(" ") +
+          (bytes.length > 16 ? " …" : ""));
     try {
       var frames = feeder(bytes);
       if (frames && frames.length) handleFrames(frames);
     } catch (e) {
-      err("parse_failed", String(e && e.message ? e.message : e));
+      L.error("parse_failed", describe(e));
+      err("parse_failed", describe(e));
     }
   }
 
   function onDisconnected() {
+    L.warn("disconnect", "gattserverdisconnected (было connected=" + connected + ")");
     if (!connected) return;
     connected = false;
     rxChar = txChar = server = null;
@@ -248,6 +291,7 @@ var ble = (function () {
   }
 
   function disconnect(reason) {
+    L.log("disconnect", "отключение по инициативе клиента (reason=" + (reason || "user") + ")");
     if (device && device.gatt && device.gatt.connected) {
       try { device.gatt.disconnect(); } catch (e) { /* ignore */ }
     }
