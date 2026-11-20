@@ -175,19 +175,43 @@ static void feedBytes(const uint8_t* data, size_t len) {
     }
 }
 
+/* ---- Готовность шлюза ----
+ * Клиент (ble.js) ждёт status {kind:"ready", mtu}, чтобы показать MTU
+ * в панели состояния. Шлём дважды: когда клиент подписался на notify
+ * (кадр гарантированно дойдёт — до подписки notify() отбрасывается),
+ * и после обмена MTU (Chrome договаривается о 247 сам, когда успеет). */
+static void sendReadyStatus(uint16_t mtu) {
+    char json[64];
+    snprintf(json, sizeof(json),
+             "{\"t\":\"status\",\"kind\":\"ready\",\"mtu\":%u}", (unsigned)mtu);
+    if (g_on_event) {
+        g_on_event(json);
+    } else {
+        ble_gateway_send_json(json);
+    }
+}
+
 /* ---- Колбэки NimBLE (API 2.x: NimBLEConnInfo&) ---- */
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
-        (void)pServer; (void)connInfo;
+        (void)pServer;
         g_client_connected = true;
-        Serial.println("[BLE] client connected");
+        Serial.printf("[BLE] client connected (mtu=%u)\n",
+                      (unsigned)connInfo.getMTU());
+    }
+    void onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) override {
+        (void)connInfo;
+        Serial.printf("[BLE] MTU exchanged: %u\n", (unsigned)MTU);
+        if (g_client_connected) sendReadyStatus(MTU);
     }
     void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
-        (void)pServer; (void)connInfo; (void)reason;
+        (void)pServer; (void)connInfo;
         g_client_connected = false;
-        Serial.println("[BLE] client disconnected");
-        /* Возобновляем рекламу для следующего подключения */
-        if (g_adv) g_adv->start();
+        Serial.printf("[BLE] client disconnected (reason=%d)\n", reason);
+        if (g_adv) {
+            bool adv_ok = g_adv->start();
+            Serial.printf("[BLE] advertising restart: %s\n", adv_ok ? "OK" : "FAILED");
+        }
     }
 };
 
@@ -199,8 +223,22 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+/* Подписка клиента на TX-notify: момент, когда кадры до клиента дойдут */
+class TxCallbacks : public NimBLECharacteristicCallbacks {
+    void onSubscribe(NimBLECharacteristic* chr, NimBLEConnInfo& connInfo,
+                     uint16_t subValue) override {
+        (void)chr;
+        Serial.printf("[BLE] tx subscribed (sub=%u, mtu=%u)\n",
+                      (unsigned)subValue, (unsigned)connInfo.getMTU());
+        if (subValue & 0x0001) {   /* notifications enabled */
+            sendReadyStatus(connInfo.getMTU());
+        }
+    }
+};
+
 static ServerCallbacks g_server_cb;
 static RxCallbacks     g_rx_cb;
+static TxCallbacks     g_tx_cb;
 
 bool ble_gateway_init(const char* device_name, BleCmdCb on_cmd, BleEventCb on_event) {
     g_on_cmd = on_cmd;
@@ -220,6 +258,7 @@ bool ble_gateway_init(const char* device_name, BleCmdCb on_cmd, BleEventCb on_ev
 
     g_tx = service->createCharacteristic(
         MESH_TX_UUID, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
+    g_tx->setCallbacks(&g_tx_cb);
 
     service->start();
 
@@ -264,6 +303,25 @@ void ble_gateway_send_frame(const uint8_t* payload, size_t len) {
 
     g_tx->setValue(frame, off);
     g_tx->notify();
+}
+
+/* Экранирование строки для JSON: кавычки, обратные слэши, управляющие
+ * символы. Без этого текст сообщения со `"` или `\` ломает JSON всего
+ * кадра. Экспортируется: main.cpp использует при сборке msg/name/nodes. */
+void ble_gateway_json_escape(const char* in, char* out, size_t cap) {
+    size_t o = 0;
+    for (size_t i = 0; in[i] && o + 2 < cap; i++) {
+        char c = in[i];
+        if (c == '"' || c == '\\') {
+            out[o++] = '\\';
+            out[o++] = c;
+        } else if ((unsigned char)c < 0x20) {
+            out[o++] = ' ';
+        } else {
+            out[o++] = c;
+        }
+    }
+    out[o] = 0;
 }
 
 void ble_gateway_send_json(const char* json) {

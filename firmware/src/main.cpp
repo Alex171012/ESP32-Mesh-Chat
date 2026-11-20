@@ -202,6 +202,14 @@ static void onEspNowRecv(const uint8_t* data, size_t len,
             if (ble_gateway_connected() && in.hdr.src != g_node_id) {
                 char json[1024];
                 const NodeEntry* src = g_nodes.find(in.hdr.src);
+                /* Экранируем имя и текст: `"` в них ломает JSON всего кадра */
+                char src_name_esc[64];
+                ble_gateway_json_escape(
+                    (src && src->name[0]) ? src->name : "",
+                    src_name_esc, sizeof(src_name_esc));
+                char text_esc[512];
+                ble_gateway_json_escape((const char*)in.body.data.text,
+                                        text_esc, sizeof(text_esc));
                 char path_str[256] = {0};
                 size_t po = 0;
                 path_str[po++] = '[';
@@ -220,9 +228,9 @@ static void onEspNowRecv(const uint8_t* data, size_t len,
                          "\"path\":%s,\"hops\":%u,\"rssi\":%d,\"ts\":%u}",
                          (unsigned)in.hdr.src, (unsigned)in.hdr.seq,
                          (unsigned)in.hdr.src,
-                         (src && src->name[0]) ? src->name : "",
+                         src_name_esc,
                          (unsigned)in.hdr.dst,
-                         in.body.data.text,
+                         text_esc,
                          path_str,
                          (unsigned)in.hdr.hop_count,
                          (int)rssi,
@@ -337,11 +345,13 @@ static void onBleCmd(const BleCommand& cmd) {
         for (int i = 0; i < NodeTable::kCapacity; i++) {
             const NodeEntry* e = g_nodes.at(i);
             if (!e) continue;
+            char name_esc[64];
+            ble_gateway_json_escape(e->name, name_esc, sizeof(name_esc));
             off += snprintf(&json[off], sizeof(json) - off,
                 "%s{\"id\":%u,\"name\":\"%s\",\"neighbor\":%s,"
                 "\"online\":%s,\"rssi\":%d,\"last_seen_ms\":%u}",
                 (i == 0) ? "" : ",",
-                (unsigned)e->id, e->name,
+                (unsigned)e->id, name_esc,
                 e->neighbor ? "true" : "false",
                 e->online ? "true" : "false",
                 (int)e->rssi,
@@ -361,13 +371,14 @@ static void onBleCmd(const BleCommand& cmd) {
     }
     case BLE_CMD_GET_NAME: {
         char json[128];
-        snprintf(json, sizeof(json),
-                 "{\"t\":\"name\",\"name\":%s,\"assigned\":%s}",
-                 g_name_assigned ? "\"" "\"" : "null",
-                 g_name_assigned ? "true" : "false");
         if (g_name_assigned) {
+            char name_esc[64];
+            ble_gateway_json_escape(g_name, name_esc, sizeof(name_esc));
             snprintf(json, sizeof(json),
-                     "{\"t\":\"name\",\"name\":\"%s\",\"assigned\":true}", g_name);
+                     "{\"t\":\"name\",\"name\":\"%s\",\"assigned\":true}", name_esc);
+        } else {
+            snprintf(json, sizeof(json),
+                     "{\"t\":\"name\",\"name\":null,\"assigned\":false}");
         }
         sendJson(json);
         break;
@@ -379,8 +390,10 @@ static void onBleCmd(const BleCommand& cmd) {
         }
         saveNameToNvs(cmd.name);
         char json[128];
+        char name_esc[64];
+        ble_gateway_json_escape(g_name, name_esc, sizeof(name_esc));
         snprintf(json, sizeof(json),
-                 "{\"t\":\"name\",\"name\":\"%s\",\"assigned\":true}", g_name);
+                 "{\"t\":\"name\",\"name\":\"%s\",\"assigned\":true}", name_esc);
         sendJson(json);
         break;
     }
@@ -396,7 +409,10 @@ static void onBleCmd(const BleCommand& cmd) {
 }
 
 static void onBleEvent(const char* json) {
-    (void)json;
+    /* Шлюз сообщает клиенту о готовности: {"t":"status","kind":"ready",
+     * "mtu":N} — приходит после подписки клиента на notify и после
+     * обмена MTU (BLE_API §4.1). Пересылаем как есть. */
+    sendJson(json);
 }
 
 /* ---- Колбэк ESP-NOW отправки ---- */

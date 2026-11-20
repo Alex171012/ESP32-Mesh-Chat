@@ -72,3 +72,9 @@ dist/
 *.orig
 .probe/
 tmp/
+# Служебные файлы среды (PATH-хаки для pwsh)
+.path_backup_user.txt
+.path_new_user.txt
+
+# Рабочий чек-лист текущего этапа — не публикуется
+docs/TODO_NOW.md

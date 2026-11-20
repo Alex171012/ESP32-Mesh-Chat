@@ -40,6 +40,12 @@ bool ble_gateway_connected();
 /* Отправить JSON клиенту (не подключён — молча отбрасываем) */
 void ble_gateway_send_json(const char* json);
 
+/* Экранировать строку для вставки внутрь JSON-строкового литерала:
+ * кавычки и обратный слэш — с обратным слэшем, управляющие (<0x20) — пробел.
+ * main.cpp вызывает при сборке кадров с текстом/именами: без этого `"`
+ * в тексте сообщения ломает JSON всего кадра. */
+void ble_gateway_json_escape(const char* in, char* out, size_t cap);
+
 /* Отправить кадр [SOF|len|payload|crc16] клиенту (вызывается из send_json) */
 void ble_gateway_send_frame(const uint8_t* payload, size_t len);
 

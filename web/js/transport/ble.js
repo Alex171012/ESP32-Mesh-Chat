@@ -93,6 +93,12 @@ var ble = (function () {
           /* шлюз → клиент: state = accepted/sent/delivered/failed.
            * id у шлюза: "local" (accepted) или hex msg_id (sent и дальше).
            * Сопоставляем с последним отправленным клиентом сообщением. */
+          if (o.kind === "ready") {
+            /* Готовность шлюза после подписки на notify / обмена MTU:
+             * app.js (handleStatus) показывает MTU в панели состояния. */
+            fire("status", { kind: "ready", mtu: o.mtu });
+            break;
+          }
           fire("status", {
             id: mapStatusId(o.id),
             state: o.state,
@@ -196,8 +202,8 @@ var ble = (function () {
         connected = true;
         fire("ble", { connected: true, gateway: null });
         startTick();
-        /* MTU: Web Bluetooth не отдаёт его напрямую; шлюз может прислать
-         * status {kind:"ready", mtu}. Если нет — подставим после первого pong. */
+        /* MTU приходит от шлюза: status {kind:"ready", mtu} после подписки
+         * на notify и после обмена MTU (ble_gateway: onSubscribe/onMTUChange). */
       });
     }).catch(function (e) {
       connected = false;
