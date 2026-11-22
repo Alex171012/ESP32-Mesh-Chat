@@ -32,6 +32,53 @@ static BleCmdCb   g_on_cmd = nullptr;
 static BleEventCb g_on_event = nullptr;
 static bool       g_client_connected = false;
 
+/* ---- Межзадачный обмен nimble_host → loopTask ----
+ * Коллбэки NimBLE (onWrite/onMTUChange/onSubscribe) выполняются в задаче
+ * nimble_host со стеком ~5 КБ. Тяжёлая работа — сборка JSON и кадра
+ * (буферы до 4 КБ!) и notify() — раньше выполнялась прямо в коллбэке и
+ * переполняла стек хоста: «Guru Meditation Error: Core 0 panic'ed (Stack
+ * protection fault). Detected in task "nimble_host"» на первом коннекте.
+ * Теперь коллбэки только складывают данные, а весь труд делает
+ * ble_gateway_poll(), которую main.cpp вызывает из loopTask (стек 8 КБ).
+ * C3 одноядерный: volatile-переменные между задачами безопасны. */
+
+/* MTU пира: 23 до обмена; обновляется в onMTUChange/onConnect,
+ * сбрасывается в onDisconnect. Используется для разбиения кадров. */
+static volatile uint16_t g_peer_mtu = 23;
+
+/* Событие «шлюз готов»: mtu ставят onMTUChange/onSubscribe, отправляет
+ * poll (0 = нет события). */
+static volatile uint16_t g_ready_mtu = 0;
+
+/* Кольцо входящих байтов: onWrite (nimble_host) пишет, poll (loopTask)
+ * читает. Один производитель + один потребитель на одном ядре — без
+ * блокировок. Ёмкость с запасом на несколько write за интервал связи. */
+static uint8_t         g_rx_ring[2048];
+static volatile size_t g_rx_w = 0;
+static volatile size_t g_rx_r = 0;
+static volatile uint32_t g_rx_dropped = 0;
+
+static void rxRingWrite(const uint8_t* data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        size_t w = g_rx_w;
+        size_t next = w + 1;
+        if (next >= sizeof(g_rx_ring)) next = 0;
+        if (next == g_rx_r) { g_rx_dropped = g_rx_dropped + 1; return; }
+        g_rx_ring[w] = data[i];
+        g_rx_w = next;
+    }
+}
+
+static bool rxRingRead(uint8_t* out) {
+    size_t r = g_rx_r;
+    if (r == g_rx_w) return false;
+    *out = g_rx_ring[r];
+    r++;
+    if (r >= sizeof(g_rx_ring)) r = 0;
+    g_rx_r = r;
+    return true;
+}
+
 /* ---- Разбор JSON без тяжёлой библиотеки: минимальный парсер ----
  * BLE_API §4: клиент шлёт простые объекты с фиксированными полями.
  * Полноценный JSON-парсер — избыточен для C3. Разбираем вручную. */
@@ -90,11 +137,18 @@ static bool jsonGetBool(const char* json, const char* key, bool* out) {
 static uint8_t  g_frame_buf[MESH_FRAME_MAX];
 static size_t   g_frame_len = 0;
 
+/* Буфер разбора — статический: локальный char json[4097] на стеке задачи
+ * вызывающего (в RX-цепочке — nimble_host) переполнял бы стек.
+ * processCompleteFrame вызывается только из ble_gateway_poll() (loopTask),
+ * поэтому один общий буфер безопасен. */
+static char g_parse_json[MESH_FRAME_MAX + 1];
+
 static void processCompleteFrame(const uint8_t* payload, size_t len) {
     /* payload — JSON */
-    char json[MESH_FRAME_MAX + 1];
-    memcpy(json, payload, len);
-    json[len] = 0;
+    if (len > MESH_FRAME_MAX) return;
+    memcpy(g_parse_json, payload, len);
+    g_parse_json[len] = 0;
+    const char* json = g_parse_json;
 
     BleCommand cmd;
     memset(&cmd, 0, sizeof(cmd));
@@ -131,55 +185,52 @@ static void processCompleteFrame(const uint8_t* payload, size_t len) {
     if (g_on_cmd) g_on_cmd(cmd);
 }
 
-/* Разбор потоковых байтов: ищем SOF, собираем по len */
-static void feedBytes(const uint8_t* data, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        uint8_t b = data[i];
-
-        if (g_frame_len == 0) {
-            if (b == MESH_FRAME_SOF) {
-                g_frame_buf[g_frame_len++] = b;
-            }
-            continue;
+/* Разбор одного входного байта: ищем SOF, собираем по len.
+ * Вызывается ТОЛЬКО из ble_gateway_poll() (loopTask): байты сначала
+ * попадают в кольцо из коллбэка onWrite, здесь — потоковый парсер. */
+static void parseByte(uint8_t b) {
+    if (g_frame_len == 0) {
+        if (b == MESH_FRAME_SOF) {
+            g_frame_buf[g_frame_len++] = b;
         }
-
-        g_frame_buf[g_frame_len++] = b;
-
-        if (g_frame_len == 3) {
-            /* Заголовок получен: проверяем длину */
-            size_t plen = (size_t)g_frame_buf[1] | ((size_t)g_frame_buf[2] << 8);
-            if (plen == 0 || plen > MESH_FRAME_MAX - 5) {
-                g_frame_len = 0;   /* отбрасываем мусор */
-                continue;
-            }
-        }
-
-        if (g_frame_len >= 3) {
-            size_t plen = (size_t)g_frame_buf[1] | ((size_t)g_frame_buf[2] << 8);
-            size_t total = 3 + plen + 2;
-            if (g_frame_len == total) {
-                /* Проверка CRC */
-                uint16_t got = (uint16_t)g_frame_buf[3 + plen] |
-                               ((uint16_t)g_frame_buf[4 + plen] << 8);
-                uint16_t calc = crc16(&g_frame_buf[3], plen);
-                if (got == calc) {
-                    processCompleteFrame(&g_frame_buf[3], plen);
-                }
-                g_frame_len = 0;
-            } else if (g_frame_len > total) {
-                g_frame_len = 0;
-            }
-        }
-
-        if (g_frame_len >= MESH_FRAME_MAX) g_frame_len = 0;
+        return;
     }
+
+    g_frame_buf[g_frame_len++] = b;
+
+    if (g_frame_len == 3) {
+        /* Заголовок получен: проверяем длину */
+        size_t plen = (size_t)g_frame_buf[1] | ((size_t)g_frame_buf[2] << 8);
+        if (plen == 0 || plen > MESH_FRAME_MAX - 5) {
+            g_frame_len = 0;   /* отбрасываем мусор */
+            return;
+        }
+    }
+
+    if (g_frame_len >= 3) {
+        size_t plen = (size_t)g_frame_buf[1] | ((size_t)g_frame_buf[2] << 8);
+        size_t total = 3 + plen + 2;
+        if (g_frame_len == total) {
+            /* Проверка CRC */
+            uint16_t got = (uint16_t)g_frame_buf[3 + plen] |
+                           ((uint16_t)g_frame_buf[4 + plen] << 8);
+            uint16_t calc = crc16(&g_frame_buf[3], plen);
+            if (got == calc) {
+                processCompleteFrame(&g_frame_buf[3], plen);
+            }
+            g_frame_len = 0;
+        } else if (g_frame_len > total) {
+            g_frame_len = 0;
+        }
+    }
+
+    if (g_frame_len >= MESH_FRAME_MAX) g_frame_len = 0;
 }
 
 /* ---- Готовность шлюза ----
  * Клиент (ble.js) ждёт status {kind:"ready", mtu}, чтобы показать MTU
- * в панели состояния. Шлём дважды: когда клиент подписался на notify
- * (кадр гарантированно дойдёт — до подписки notify() отбрасывается),
- * и после обмена MTU (Chrome договаривается о 247 сам, когда успеет). */
+ * в панели состояния. Вызывается ТОЛЬКО из ble_gateway_poll() (loopTask):
+ * коллбэки NimBLE лишь ставят флаг g_ready_mtu. */
 static void sendReadyStatus(uint16_t mtu) {
     char json[64];
     snprintf(json, sizeof(json),
@@ -202,11 +253,16 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     void onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) override {
         (void)connInfo;
         Serial.printf("[BLE] MTU exchanged: %u\n", (unsigned)MTU);
-        if (g_client_connected) sendReadyStatus(MTU);
+        /* Только флаг: реальную отправку ready делает poll (loopTask).
+         * onMTUChange и onSubscribe могут прийти оба — отправка
+         * идемпотентна, poll разгребает последний MTU. */
+        if (g_client_connected) g_ready_mtu = MTU;
+        g_peer_mtu = MTU;
     }
     void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
         (void)pServer; (void)connInfo;
         g_client_connected = false;
+        g_peer_mtu = 23;   /* на новом соединении MTU снова 23 до обмена */
         Serial.printf("[BLE] client disconnected (reason=%d)\n", reason);
         if (g_adv) {
             bool adv_ok = g_adv->start();
@@ -219,7 +275,7 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* chr, NimBLEConnInfo& connInfo) override {
         (void)connInfo;
         NimBLEAttValue v = chr->getValue();
-        if (v.size() > 0) feedBytes(v.data(), v.size());
+        if (v.size() > 0) rxRingWrite(v.data(), v.size());
     }
 };
 
@@ -231,7 +287,10 @@ class TxCallbacks : public NimBLECharacteristicCallbacks {
         Serial.printf("[BLE] tx subscribed (sub=%u, mtu=%u)\n",
                       (unsigned)subValue, (unsigned)connInfo.getMTU());
         if (subValue & 0x0001) {   /* notifications enabled */
-            sendReadyStatus(connInfo.getMTU());
+            /* Только флаг — саму отправку делает poll (loopTask). */
+            uint16_t mtu = connInfo.getMTU();
+            if (!mtu) mtu = g_peer_mtu;
+            if (g_client_connected) g_ready_mtu = mtu;
         }
     }
 };
@@ -260,7 +319,8 @@ bool ble_gateway_init(const char* device_name, BleCmdCb on_cmd, BleEventCb on_ev
         MESH_TX_UUID, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
     g_tx->setCallbacks(&g_tx_cb);
 
-    service->start();
+    /* service->start() в NimBLE 2.x — no-op (deprecated): сервисы стартуют
+     * вместе с NimBLEDevice::startServices() ниже. */
 
     g_adv = NimBLEDevice::getAdvertising();
     /* Имя ОБЯЗАТЕЛЬНО в advertising data — NimBLEDevice::init() кладёт его
@@ -286,11 +346,18 @@ bool ble_gateway_connected() {
     return g_client_connected;
 }
 
+/* Буфер TX — статический: локальный uint8_t frame[4096] на стеке
+ * вызывающего переполнял бы стек задачи nimble_host (sendReadyStatus
+ * вызывался из onSubscribe/onMTUChange). send_frame теперь выполняется
+ * только на loopTask (через poll → on_event/send_json), один общий
+ * буфер безопасен. */
+static uint8_t g_tx_frame[MESH_FRAME_MAX];
+
 void ble_gateway_send_frame(const uint8_t* payload, size_t len) {
     if (!g_tx || !g_client_connected) return;
     if (len + 5 > MESH_FRAME_MAX) return;
 
-    uint8_t frame[MESH_FRAME_MAX];
+    uint8_t* frame = g_tx_frame;
     size_t off = 0;
     frame[off++] = MESH_FRAME_SOF;
     frame[off++] = (uint8_t)(len & 0xff);
@@ -301,8 +368,22 @@ void ble_gateway_send_frame(const uint8_t* payload, size_t len) {
     frame[off++] = (uint8_t)(crc & 0xff);
     frame[off++] = (uint8_t)((crc >> 8) & 0xff);
 
+    /* Кадр может быть длиннее MTU-3: клиентский парсер (web/js/protocol.js
+     * createFeeder) потоковый и собирает кадр из нескольких notify.
+     * Разбиваем на куски по MTU-3 (клампим до 247; при MTU<23 — 20).
+     * Клиент шлёт свои кадры целиком (≤192 байта при MTU 23), это ок. */
+    uint16_t mtu = g_peer_mtu;
+    size_t chunk = (mtu >= 23) ? (size_t)(mtu - 3) : 20;
+    if (chunk > 247) chunk = 247;
+    if (chunk < 1) chunk = 1;
+
     g_tx->setValue(frame, off);
     g_tx->notify();
+    for (size_t pos = chunk; pos < off; pos += chunk) {
+        size_t n = (off - pos < chunk) ? (off - pos) : chunk;
+        g_tx->setValue(&frame[pos], n);
+        g_tx->notify();
+    }
 }
 
 /* Экранирование строки для JSON: кавычки, обратные слэши, управляющие
@@ -329,10 +410,31 @@ void ble_gateway_send_json(const char* json) {
     ble_gateway_send_frame((const uint8_t*)json, strlen(json));
 }
 
+/* Периодическое обслуживание. Вызывается из loop() на loopTask — здесь
+ * допустима «тяжёлая» работа (буферы, send_json), которую убрали из
+ * коллбэков nimble_host. */
 void ble_gateway_poll() {
-    /* NimBLE работает в своих задачах; здесь — ничего.
-     * Оставлено как точка расширения (тайм-ауты, переодическая реклама).
-     */
+    /* 1) Готовность: коллбэки NimBLE (nimble_host) поставили MTU —
+     *    шлём ready отсюда, с безопасного стека. */
+    uint16_t ready = g_ready_mtu;
+    if (ready != 0) {
+        g_ready_mtu = 0;
+        if (g_client_connected) sendReadyStatus(ready);
+    }
+
+    /* 2) Разбор входящих байтов из кольца (производитель — onWrite). */
+    uint8_t b;
+    while (rxRingRead(&b)) {
+        parseByte(b);
+    }
+
+    /* 3) Переполнение кольца диагностируем (данные при этом потеряны). */
+    uint32_t dropped = g_rx_dropped;
+    if (dropped != 0) {
+        g_rx_dropped = 0;
+        Serial.printf("[BLE] WARNING: rx ring overflow, dropped %u bytes\n",
+                      (unsigned)dropped);
+    }
 }
 
 void ble_gateway_disconnect_client() {

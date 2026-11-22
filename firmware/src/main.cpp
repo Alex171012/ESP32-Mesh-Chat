@@ -427,6 +427,32 @@ void setup() {
     Serial.begin(115200);
     delay(100);
     Serial.println("\n[boot] ESP32-C3 Mesh Chat");
+    /* Причина последнего сброса — чтобы в логе сразу было видно,
+     * паника это была, внешний сброс (кнопка/DTR-глюк) или питание.
+     * Enum esp_reset_reason_t (IDF 5): 0 UNKNOWN, 1 POWERON, 2 EXT,
+     * 3 SW, 4 PANIC, 5 INT_WDT, 6 TASK_WDT, 7 WDT, 8 DEEPSLEEP,
+     * 9 BROWNOUT, 10 SDIO, 11 USB, 12 JTAG, 13 EFUSE,
+     * 14 PWR_GLITCH, 15 CPU_LOCKUP. */
+    const char* rst = "UNKNOWN";
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:    rst = "POWERON";    break;
+        case ESP_RST_EXT:        rst = "EXT(button)";break;
+        case ESP_RST_SW:         rst = "SW";         break;
+        case ESP_RST_PANIC:      rst = "PANIC";      break;
+        case ESP_RST_INT_WDT:    rst = "INT_WDT";    break;
+        case ESP_RST_TASK_WDT:   rst = "TASK_WDT";   break;
+        case ESP_RST_WDT:        rst = "WDT";        break;
+        case ESP_RST_DEEPSLEEP:  rst = "DEEPSLEEP";  break;
+        case ESP_RST_BROWNOUT:   rst = "BROWNOUT";   break;
+        case ESP_RST_SDIO:       rst = "SDIO";       break;
+        case ESP_RST_USB:        rst = "USB";        break;
+        case ESP_RST_JTAG:       rst = "JTAG";       break;
+        case ESP_RST_EFUSE:      rst = "EFUSE";      break;
+        case ESP_RST_PWR_GLITCH: rst = "PWR_GLITCH"; break;
+        case ESP_RST_CPU_LOCKUP: rst = "CPU_LOCKUP"; break;
+        default: break;
+    }
+    Serial.printf("[boot] reset reason: %s\n", rst);
 
     pinMode(MESH_LED_PIN, OUTPUT);
     digitalWrite(MESH_LED_PIN, LOW);

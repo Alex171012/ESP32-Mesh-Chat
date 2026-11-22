@@ -220,8 +220,17 @@ var ble = (function () {
       rxChar = chars[0];
       txChar = chars[1];
       L.log("gatt", "3/4 OK — RX/TX характеристики получены");
-      L.log("gatt", "      RX props=" + JSON.stringify(rxChar.properties) +
-            ", TX props=" + JSON.stringify(txChar.properties));
+      /* properties — getter-объект: JSON.stringify всегда даёт {}.
+       * Перечисляем ключи через for-in — выводим только «правду». */
+      function props(c) {
+        var keys = [];
+        for (var k in c.properties) {
+          if (c.properties[k]) keys.push(k);
+        }
+        return keys.join("|") || "(none)";
+      }
+      L.log("gatt", "      RX props=" + props(rxChar) +
+            ", TX props=" + props(txChar));
 
       feeder = protocol.createFeeder(function (msg) {
         L.warn("feeder", msg);

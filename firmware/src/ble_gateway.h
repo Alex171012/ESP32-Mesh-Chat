@@ -49,7 +49,9 @@ void ble_gateway_json_escape(const char* in, char* out, size_t cap);
 /* Отправить кадр [SOF|len|payload|crc16] клиенту (вызывается из send_json) */
 void ble_gateway_send_frame(const uint8_t* payload, size_t len);
 
-/* Периодическое обслуживание (вызывать из loop) */
+/* Периодическое обслуживание (вызывать из loop). Тяжёлая работа шлюза —
+ * здесь, на стеке loopTask: коллбэки NimBLE выполняются в задаче
+ * nimble_host (~5 КБ стека) и только ставят флаги/пишут в кольцо байтов. */
 void ble_gateway_poll();
 
 /* Отключить клиента (по команде busy) */

@@ -24,6 +24,7 @@ sdkconfig.defaults.old
 # В логах могут быть реальные MAC-адреса плат и node_id
 *.log
 serial*.txt
+.serial_log.txt
 *.pcap
 *.dump
 logs/
