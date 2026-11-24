@@ -195,6 +195,9 @@ var app = (function () {
           if (!state.S.connected) return;
           lastPingAt = performance.now();
           transport.ping();
+          /* и список узлов: шлюз наполняет таблицу асинхронно (HELLO раз в 10 с),
+             без опроса новые соседи не видны до переподключения */
+          transport.getNodes();
         }, 5000);
         lastPingAt = performance.now();
         transport.ping();
